@@ -17,36 +17,49 @@ export class AIAgent {
    
     const prompt = PromptTemplate.fromTemplate(`
     
-You are an expert technical recruiter and resume strategist.
-Analyze the following resume and extract the sections WITHOUT modifying any LaTeX.
+ You are a LaTeX resume parser.
 
-Resume:
-{resume}
+You will be given the full LaTeX source of a resume in the placeholder LATEX_SOURCE below.
 
-Output the analysis in this JSON format only no pre text:
+Your job:
+1. Identify logical resume sections (for example: "Summary", "Experience", "Projects", "Skills", "Education", "Achievements").
+2. For each section, extract the exact LaTeX code that belongs to that section.
+3. Split that LaTeX code into individual lines.
+4. also give others sections resume in separate list for example : usepackage , setlimit etc 
+
+Output format (very important):
+- Respond with ONLY valid JSON. No markdown, no backticks, no explanations.
+- The top-level JSON object must have this shape:
 
 {{
   "sections": [
     {{
-      "section_name": "Section1",
-      "section_content": "Exact LaTeX for Section1"
-    }},
-    {{
-      "section_name": "Section2",
-      "section_content": "Exact LaTeX for Section2"
+      "title": "Summary",
+      "latex_lines": [
+        "... one line of LaTeX ...",
+        "... another line of LaTeX ..."
+      ]
     }}
   ]
 }}
 
-NOTE:
-- Do NOT give any pre text.
-- DO NOT modify LaTeX.
-- DO NOT remove or add anything inside LaTeX code.
-- Only group into sections.
+Rules for "latex_lines":
+- Each element in "latex_lines" is exactly ONE line of LaTeX from the input.
+- Do NOT put actual newline characters inside a string. Each line is a separate array element.
+- Copy the LaTeX content exactly. Do not rewrite or reflow it.
+- Preserve the order of lines and sections as in the original.
+
+Rules for the overall response:
+- Output must be valid JSON that can be parsed by JSON.parse in JavaScript.
+- Do NOT include any text before or after the JSON.
+- Do NOT wrap the JSON in \`\`\`json or any other fences.
+
+LATEX_SOURCE:
+{resume}
 `);
     const chain = prompt.pipe(this.model);
     try {
-      const result = (await chain.invoke({ resume }));
+      const result = (await chain.invoke({ resume }))
       console.log(result);
       return result;
     } catch (error) {

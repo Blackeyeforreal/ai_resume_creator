@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import { LatexProcessor } from './engine/latexProcessor.js';
 import { AIAgent } from './engine/aiAgent.js';
-
+import { splitLatexIntoSections } from './engine/latexProcessorOnSteroids.js'
+import { fixInvalidBackslashes } from './engine/util.js';
 dotenv.config();
 
 const app = express();
@@ -30,10 +31,12 @@ app.post('/parse', async (req, res) => {
         if (!latex) {
             return res.status(400).json({ error: 'No latex content provided' });
         }
-        const sections = await aiAgent.parseLatext(latex);// latexProcessor.parseSections(latex);
+        const sections = await aiAgent.parseLatext(latex);     // await aiAgent.parseLatext(latex);// latexProcessor.parseSections(latex);
         try {
-            const parsed = JSON.parse(sections.replace(/\\/g, ''));
-            res.json(parsed);
+            const parsed = fixInvalidBackslashes(sections);
+            const jsonParsed = JSON.parse(parsed);
+            res.json(jsonParsed);
+            console.log(jsonParsed);
         } catch (error) {
             console.error(error);
             res.json({ raw: sections });

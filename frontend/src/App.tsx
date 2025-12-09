@@ -2,15 +2,21 @@ import { useState } from 'react'
 import { Upload, FileText, ArrowRight, Wand2, Smartphone } from 'lucide-react'
 import { cn } from './lib/utils'
 
-interface Section {
-  section_name: string;
-  section_content: string;
+interface ResumeSection {
+  title: string;
+  latex: string;
+     // which macro/environment created the section
 }
+type Section = {
+  title: string;
+  latex_lines: string[];
+};
+
 
 function App() {
   const [latexContent, setLatexContent] = useState<string>('')
   const [jobDescription, setJobDescription] = useState<string>('')
-  const [sections, setSections] = useState<Section[]>([])
+  const [sections, setSections] = useState<ResumeSection[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor')
 
@@ -22,6 +28,7 @@ function App() {
     setLatexContent(text)
 
     // Parse immediately
+    console.log("method called")
     try {
       setLoading(true)
       const response = await fetch('http://localhost:3000/parse', {
@@ -29,9 +36,19 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ latex: text })
       })
+
       const data = await response.json()
-      setSections(data.sections) // Correctly accessing the array from the response object
+
+      const sections: Section[] = data.sections;
+
+      const reconstructed = sections.map((s) => ({
+        title: s.title,
+        latex: s.latex_lines.join("\n"),
+      }));
+      console.log(reconstructed)
+      setSections(reconstructed) // Correctly accessing the array from the response object
       setLoading(false)
+      event.target.value = ''
     } catch (error) {
       console.error("Parsing failed", error)
     }
@@ -52,14 +69,14 @@ function App() {
 
       // 2. Tailor valid sections (e.g., Experience)
       // For demo, we just tailor "Experience" if it exists
-      const experienceSection = sections.find(s => s.section_name === 'Experience');
+      const experienceSection = sections.find(s => s.title === 'Experience');
       if (experienceSection) {
         const tailorRes = await fetch('http://localhost:3000/tailor', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             sectionName: 'Experience',
-            currentContent: experienceSection.section_content,
+            currentContent: experienceSection.latex,
             jdAnalysis: analysis
           })
         })
@@ -67,8 +84,8 @@ function App() {
 
         // Update state with new content
         setSections(prev => prev.map(sec =>
-          sec.section_name === 'Experience'
-            ? { ...sec, section_content: tailorData.content }
+          sec.title === 'Experience'
+            ? { ...sec, latex: tailorData.content }
             : sec
         ))
 
@@ -147,16 +164,16 @@ function App() {
                 <div className="text-center text-slate-600 mt-20 italic">No sections parsed yet.</div>
               ) : (
                 sections.map((section, index) => (
-                  <div key={section.section_name || index} className="space-y-2">
+                  <div key={section.title || index} className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-blue-400 uppercase bg-blue-400/10 px-2 py-1 rounded">{section.section_name}</span>
+                      <span className="text-xs font-bold text-blue-400 uppercase bg-blue-400/10 px-2 py-1 rounded">{section.title}</span>
                     </div>
                     <textarea
                       className="w-full h-32 bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-300 focus:border-blue-500 focus:outline-none scrollbar-thin scrollbar-thumb-slate-700"
-                      value={section.section_content}
+                      value={section.latex}
                       onChange={(e) => {
                         setSections(prev => prev.map((sec, i) =>
-                          i === index ? { ...sec, section_content: e.target.value } : sec
+                          i === index ? { ...sec, latex: e.target.value } : sec
                         ))
                       }}
                     />
@@ -187,11 +204,11 @@ function App() {
             {activeTab === 'editor' ? (
               <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap">
                 {/* Reconstruct full latex for display */}
-                {sections.find(s => s.section_name === 'preamble')?.section_content || ''}
+                {sections.find(s => s.title === 'preamble')?.latex || ''}
                 {'\n\n'}
                 {sections
-                  .filter(s => s.section_name !== 'preamble')
-                  .map(s => `\\section{${s.section_name}}\n${s.section_content}`)
+                  .filter(s => s.title !== 'preamble')
+                  .map(s => `\\section{${s.title}}\n${s.latex}`)
                   .join('\n\n')
                 }
                 {'\n\n\\end{document}'}
