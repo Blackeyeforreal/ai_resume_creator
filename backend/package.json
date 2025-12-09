@@ -1,0 +1,36 @@
+{
+    "name": "ai-resume-backend",
+    "version": "1.0.0",
+    "description": "Backend for AI Resume Creator",
+    "type": "module",
+    "main": "dist/server.js",
+    "scripts": {
+        "start": "node dist/server.js",
+        "dev": "nodemon --exec tsx src/server.ts",
+        "build": "tsc"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@langchain/community": "^1.0.7",
+        "@langchain/core": "^1.1.4",
+        "@langchain/ollama": "^1.0.3",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "langchain": "^0.1.37",
+        "multer": "^1.4.5-lts.1",
+        "ollama": "^0.5.18"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/multer": "^1.4.11",
+        "@types/node": "^20.19.25",
+        "nodemon": "^3.1.0",
+        "ts-node": "^10.9.2",
+        "tsx": "^4.21.0",
+        "typescript": "^5.4.5"
+    }
+}
