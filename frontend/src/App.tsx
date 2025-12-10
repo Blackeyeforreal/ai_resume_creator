@@ -1,24 +1,118 @@
-import { useState } from 'react'
-import { Upload, FileText, ArrowRight, Wand2, Smartphone } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Upload, FileText, ArrowRight, Wand2, CheckSquare, Square } from 'lucide-react'
 import { cn } from './lib/utils'
+// @ts-ignore
+import { parse, HtmlGenerator } from 'latex.js'
 
 interface ResumeSection {
   title: string;
   latex: string;
-     // which macro/environment created the section
+  // which macro/environment created the section
 }
 type Section = {
   title: string;
   latex_lines: string[];
 };
+function stripDocumentEnvironment(tex: string): string {
+  return tex
+    // .replace(/\\begin\s*\{\s*document\s*\}/gi, "")
+    // .replace(/\\end\s*\{\s*document\s*\}/gi, "");
+}
+
+function normalizeLatexForPreview(tex: string): string {
+  return tex.replace(/\\n\s*/g, "\n");
+}
+function sanitizeLatexForPreview(tex: string): string {
+  let cleaned = tex;
+
+  // 1. Convert literal "\n" markers to real newlines
+  cleaned = cleaned.replace(/\\n\s*/g, "\n");
+
+  // 2. Remove/neutralize \hfill (latex.js doesn't know it; we just use a space)
+  cleaned = cleaned.replace(/\\hfill\b/g, " ");
+
+  // 3. Simplify itemize options: \begin{itemize}[leftmargin=1.5em] -> \begin{itemize}
+  cleaned = cleaned.replace(
+    /\\begin\{itemize\}\s*\[[^\]]*]/g,
+    "\\begin{itemize}"
+  );
+
+  // 4. (Optional) If you ever get duplicate sections like \section and \section* with same title:
+  cleaned = cleaned.replace(
+    /\\section\{([^}]*)\}\s*\\section\*\{\1\}/g,
+    "\\section*{$1}"
+  );
+
+  return cleaned;
+}
+
+
+function extractDocumentBody(tex: string): string {
+  const beginTag = "\\begin{document}";
+  const endTag = "\\end{document}";
+
+  const beginIdx = tex.indexOf(beginTag);
+  const endIdx = tex.indexOf(endTag);
+
+  if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
+    return tex.slice(beginIdx + beginTag.length, endIdx).trim();
+  }
+
+  // If there is no explicit document env, just return as-is
+  return tex;
+}
 
 
 function App() {
   const [latexContent, setLatexContent] = useState<string>('')
   const [jobDescription, setJobDescription] = useState<string>('')
   const [sections, setSections] = useState<ResumeSection[]>([])
+  const [selectedSections, setSelectedSections] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor')
+  const previewRef = useRef<HTMLDivElement>(null)
+  const [preamble, setPreamble] = useState<string>('');
+  const [postamble, setPostamble] = useState<string>('');
+
+  
+  useEffect(() => {
+    if (activeTab === 'preview' && previewRef.current) {
+      renderPreview();
+    }
+  }, [activeTab, sections])
+
+  const renderPreview = () => {
+    if (!previewRef.current) return;
+    try {
+      const fullLatex = reconstructLatex();
+      let body = stripDocumentEnvironment(fullLatex);
+
+    // 3. Fix literal "\n" artifacts from LLM / JSON
+     body = sanitizeLatexForPreview(body);
+console.log(body)
+      // const bodyLatex = extractDocumentBody(fullLatex)
+      // const sanitizedLatex = sanitizeLatexForPreview(fullLatex)
+      // console.log(sanitizedLatex)
+      const generator = new HtmlGenerator({ hyphenate: false });
+      const doc = parse(body, { generator: generator });
+
+      previewRef.current.innerHTML = '';
+      previewRef.current.appendChild(doc.domFragment());
+    } catch (error) {
+      console.error("Preview render failed:", error);
+      previewRef.current.innerHTML = '<div class="text-red-500 p-4">Preview Error: ' + (error as any).message + '</div>';
+    }
+  }
+
+  const reconstructLatex = () => {
+    //const preamble = sections.find(s => s.title === 'preamble')?.latex || '';
+    const body = sections
+      .filter(s => s.title !== 'preamble')
+      .map(s => `\\section{${s.title}}\n${s.latex}`)
+      .join('\n\n');
+
+    return `${preamble}\n\\begin{document}\n${body}\n\\end{document}`;
+  }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -27,8 +121,6 @@ function App() {
     const text = await file.text()
     setLatexContent(text)
 
-    // Parse immediately
-    console.log("method called")
     try {
       setLoading(true)
       const response = await fetch('http://localhost:3000/parse', {
@@ -38,20 +130,37 @@ function App() {
       })
 
       const data = await response.json()
-
-      const sections: Section[] = data.sections;
-
-      const reconstructed = sections.map((s) => ({
+      const rawSections: Section[] = data.sections;
+      const preamble = data.preamble_lines.join("\n");
+      const postamble = data.postamble_lines.join("\n");
+      setPreamble(preamble)
+      setPostamble(postamble)
+      const reconstructed = rawSections.map((s) => ({
         title: s.title,
         latex: s.latex_lines.join("\n"),
       }));
-      console.log(reconstructed)
-      setSections(reconstructed) // Correctly accessing the array from the response object
+
+      setSections(reconstructed)
+      // Select all by default except preamble
+      const newSelected = new Set(reconstructed.filter(s => s.title !== 'preamble').map(s => s.title));
+      setSelectedSections(newSelected);
+
       setLoading(false)
       event.target.value = ''
     } catch (error) {
       console.error("Parsing failed", error)
+      setLoading(false)
     }
+  }
+
+  const toggleSection = (title: string) => {
+    const newSelected = new Set(selectedSections);
+    if (newSelected.has(title)) {
+      newSelected.delete(title);
+    } else {
+      newSelected.add(title);
+    }
+    setSelectedSections(newSelected);
   }
 
   const handleAnalyzeAndTailor = async () => {
@@ -67,30 +176,27 @@ function App() {
       })
       const analysis = await analyzeRes.json()
 
-      // 2. Tailor valid sections (e.g., Experience)
-      // For demo, we just tailor "Experience" if it exists
-      const experienceSection = sections.find(s => s.title === 'Experience');
-      if (experienceSection) {
+      // 2. Tailor SELECTED sections
+      const sectionsToTailor = sections.filter(s => selectedSections.has(s.title));
+
+      for (const section of sectionsToTailor) {
         const tailorRes = await fetch('http://localhost:3000/tailor', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sectionName: 'Experience',
-            currentContent: experienceSection.latex,
+            sectionName: section.title,
+            currentContent: section.latex,
             jdAnalysis: analysis
           })
         })
         const tailorData = await tailorRes.json()
 
-        // Update state with new content
+        // Update state immediately for feedback
         setSections(prev => prev.map(sec =>
-          sec.title === 'Experience'
+          sec.title === section.title
             ? { ...sec, latex: tailorData.content }
             : sec
         ))
-
-        // In a real app, we would reconstruct the full latex string here
-        console.log("Tailored Experience:", tailorData.content)
       }
 
     } catch (error) {
@@ -108,7 +214,7 @@ function App() {
           <Wand2 className="w-5 h-5" />
           <span className="font-bold tracking-tight">AI Resume Engineer</span>
         </div>
-        <div className="text-xs text-slate-500">v1.0.0 Local Agent</div>
+        <div className="text-xs text-slate-500">v1.1.0 Interactive</div>
       </header>
 
       {/* Main Content - 3 Panes */}
@@ -137,14 +243,14 @@ function App() {
 
           <button
             onClick={handleAnalyzeAndTailor}
-            disabled={loading}
+            disabled={loading || selectedSections.size === 0}
             className={cn(
               "h-12 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition all",
-              loading && "opacity-50 cursor-not-allowed"
+              (loading || selectedSections.size === 0) && "opacity-50 cursor-not-allowed"
             )}
           >
             {loading ? <Wand2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
-            {loading ? "Analyzing & Tailoring..." : "Optimize Resume"}
+            {loading ? "Analyzing & Tailoring..." : `Optimize ${selectedSections.size} Selected Sections`}
           </button>
         </div>
 
@@ -152,36 +258,54 @@ function App() {
         <div className="w-1/3 border-r border-slate-800 flex flex-col bg-slate-900/10">
           <div className="h-10 border-b border-slate-800 flex items-center px-4 justify-between bg-slate-900/30">
             <span className="text-sm font-medium text-slate-300">Sections Detected</span>
+            <span className="text-xs text-slate-500">{sections.length} sections</span>
           </div>
-          {loading && (
+          {loading && sections.length === 0 && (
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="text-center text-slate-600 mt-20 italic">Analyzing & Tailoring...</div>
+              <div className="text-center text-slate-600 mt-20 italic">Processing...</div>
             </div>
           )}
-          {!loading && (
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {sections.length === 0 ? (
-                <div className="text-center text-slate-600 mt-20 italic">No sections parsed yet.</div>
-              ) : (
-                sections.map((section, index) => (
-                  <div key={section.title || index} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-blue-400 uppercase bg-blue-400/10 px-2 py-1 rounded">{section.title}</span>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {sections.length === 0 ? (
+              <div className="text-center text-slate-600 mt-20 italic">No sections parsed yet.</div>
+            ) : (
+              sections.map((section, index) => (
+                <div key={section.title || index} className="space-y-2 group">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleSection(section.title)}
+                        className="text-slate-400 hover:text-blue-400 transition"
+                        title={selectedSections.has(section.title) ? "Unselect for optimization" : "Select for optimization"}
+                      >
+                        {selectedSections.has(section.title)
+                          ? <CheckSquare className="w-4 h-4 text-blue-500" />
+                          : <Square className="w-4 h-4" />
+                        }
+                      </button>
+                      <span className={cn(
+                        "text-xs font-bold uppercase px-2 py-1 rounded transition",
+                        selectedSections.has(section.title) ? "bg-blue-400/10 text-blue-400" : "bg-slate-800 text-slate-500"
+                      )}>
+                        {section.title}
+                      </span>
                     </div>
-                    <textarea
-                      className="w-full h-32 bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-300 focus:border-blue-500 focus:outline-none scrollbar-thin scrollbar-thumb-slate-700"
-                      value={section.latex}
-                      onChange={(e) => {
-                        setSections(prev => prev.map((sec, i) =>
-                          i === index ? { ...sec, latex: e.target.value } : sec
-                        ))
-                      }}
-                    />
                   </div>
-                ))
-              )}
-            </div>
-          )}
+                  <textarea
+                    className="w-full h-32 bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-300 focus:border-blue-500 focus:outline-none scrollbar-thin scrollbar-thumb-slate-700 transition"
+                    value={section.latex}
+                    onChange={(e) => {
+                      setSections(prev => prev.map((sec, i) =>
+                        i === index ? { ...sec, latex: e.target.value } : sec
+                      ))
+                    }}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+
         </div>
 
         {/* Pane 3: Preview */}
@@ -197,27 +321,24 @@ function App() {
               onClick={() => setActiveTab('preview')}
               className={cn("text-xs font-medium h-full border-b-2 px-2 transition", activeTab === 'preview' ? "border-blue-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300")}
             >
-              PDF Preview
+              Web Preview
             </button>
           </div>
           <div className="flex-1 p-4 bg-slate-900/50 overflow-auto">
             {activeTab === 'editor' ? (
               <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap">
-                {/* Reconstruct full latex for display */}
-                {sections.find(s => s.title === 'preamble')?.latex || ''}
-                {'\n\n'}
-                {sections
-                  .filter(s => s.title !== 'preamble')
-                  .map(s => `\\section{${s.title}}\n${s.latex}`)
-                  .join('\n\n')
-                }
-                {'\n\n\\end{document}'}
+                {reconstructLatex()}
               </pre>
             ) : (
-              <div className="flex items-center justify-center h-full text-slate-500 flex-col gap-2">
-                <Smartphone className="w-8 h-8 opacity-20" />
-                <p>PDF compilation not connected to live preview yet.</p>
-                <p className="text-xs opacity-50">Requires local pdflatex or standard template.</p>
+              <div
+                ref={previewRef}
+                className="w-full h-full bg-white text-black p-8 overflow-auto shadow-lg resume-preview"
+              >
+                {/* Content will be injected here by latex.js */}
+                <div className="flex items-center justify-center h-full text-slate-500 flex-col gap-2">
+                  <Wand2 className="w-8 h-8 opacity-20 animate-pulse" />
+                  <p className='text-xs'>Rendering Preview...</p>
+                </div>
               </div>
             )}
           </div>

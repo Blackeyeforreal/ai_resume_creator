@@ -21,26 +21,28 @@ export class AIAgent {
 
 You will be given the full LaTeX source of a resume in the placeholder LATEX_SOURCE below.
 
-Your job:
-1. Identify logical resume sections (for example: "Summary", "Experience", "Projects", "Skills", "Education", "Achievements").
-2. For each section, extract the exact LaTeX code that belongs to that section.
-3. Split that LaTeX code into individual lines.
-4. also give others sections resume in separate list for example : usepackage , setlimit etc 
+Your tasks:
+1. Identify logical resume sections (e.g. "Summary", "Experience", "Projects", "Skills", "Education", "Achievements").
+2. Split the LaTeX into three parts:
+   - "preamble_lines": all lines before the first logical section link usepackage, setlimit etc.
+   - "sections": each section has a title and the LaTeX lines that belong to that section.
+   - "postamble_lines": all lines after the last logical section.
+3. Keep all LaTeX content exactly as in the input (no rewriting).
+4. make sure there is no data loss , all the line must be present in the output.
 
-Output format (very important):
+Output format (VERY IMPORTANT):
 - Respond with ONLY valid JSON. No markdown, no backticks, no explanations.
-- The top-level JSON object must have this shape:
+- Use this exact structure:
 
 {{
+  "preamble_lines": [ "..." ],
   "sections": [
     {{
       "title": "Summary",
-      "latex_lines": [
-        "... one line of LaTeX ...",
-        "... another line of LaTeX ..."
-      ]
+      "latex_lines": [ "...", "..." ]
     }}
-  ]
+  ],
+  "postamble_lines": [ "..." ]
 }}
 
 Rules for "latex_lines":
