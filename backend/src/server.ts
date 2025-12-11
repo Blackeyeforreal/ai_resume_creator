@@ -4,8 +4,8 @@ import dotenv from 'dotenv';
 import multer from 'multer';
 import { LatexProcessor } from './engine/latexProcessor.js';
 import { AIAgent } from './engine/aiAgent.js';
+import { compileLatexWithTectonic } from './engine/tatonic/tatonicProcess.js';
 import { splitLatexIntoSections } from './engine/latexProcessorOnSteroids.js'
-import { fixInvalidBackslashes } from './engine/util.js';
 dotenv.config();
 
 const app = express();
@@ -33,10 +33,8 @@ app.post('/parse', async (req, res) => {
         }
         const sections = await aiAgent.parseLatext(latex);     // await aiAgent.parseLatext(latex);// latexProcessor.parseSections(latex);
         try {
-            const parsed = fixInvalidBackslashes(sections);
-            const jsonParsed = JSON.parse(parsed);
-            res.json(jsonParsed);
-            console.log(jsonParsed);
+            res.json(sections);
+            console.log(sections);
         } catch (error) {
             console.error(error);
             res.json({ raw: sections });
@@ -84,7 +82,17 @@ app.post('/tailor', async (req, res) => {
 });
 
 app.post('/compile', async (req, res) => {
-    res.status(501).json({ error: 'Not implemented: Local PDF compilation requires pdflatex.' });
+    try {
+        const { latex } = req.body;
+        if (!latex) return res.status(400).json({ error: 'No latex provided' });
+
+        const pdfBuffer = await compileLatexWithTectonic(latex);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.send(pdfBuffer);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Compilation failed' });
+    }
 });
 
 app.listen(port, () => {

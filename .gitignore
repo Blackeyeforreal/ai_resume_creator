@@ -19,3 +19,7 @@ build
 # IDEs
 .vscode
 .idea
+backend/src/engine/tatonic/tectonic.exe
+tectonic.exe
+resume.tex
+resume.pdf

@@ -4,6 +4,7 @@ import { cn } from './lib/utils'
 // @ts-ignore
 import { parse, HtmlGenerator } from 'latex.js'
 
+
 interface ResumeSection {
   title: string;
   latex: string;
@@ -13,54 +14,54 @@ type Section = {
   title: string;
   latex_lines: string[];
 };
-function stripDocumentEnvironment(tex: string): string {
-  return tex
-    // .replace(/\\begin\s*\{\s*document\s*\}/gi, "")
-    // .replace(/\\end\s*\{\s*document\s*\}/gi, "");
-}
+// function stripDocumentEnvironment(tex: string): string {
+//   return tex
+//   // .replace(/\\begin\s*\{\s*document\s*\}/gi, "")
+//   // .replace(/\\end\s*\{\s*document\s*\}/gi, "");
+// }
 
-function normalizeLatexForPreview(tex: string): string {
-  return tex.replace(/\\n\s*/g, "\n");
-}
-function sanitizeLatexForPreview(tex: string): string {
-  let cleaned = tex;
+// function normalizeLatexForPreview(tex: string): string {
+//   return tex.replace(/\\n\s*/g, "\n");
+// }
+// function sanitizeLatexForPreview(tex: string): string {
+//   let cleaned = tex;
 
-  // 1. Convert literal "\n" markers to real newlines
-  cleaned = cleaned.replace(/\\n\s*/g, "\n");
+//   // 1. Convert literal "\n" markers to real newlines
+//   cleaned = cleaned.replace(/\\n\s*/g, "\n");
 
-  // 2. Remove/neutralize \hfill (latex.js doesn't know it; we just use a space)
-  cleaned = cleaned.replace(/\\hfill\b/g, " ");
+//   // 2. Remove/neutralize \hfill (latex.js doesn't know it; we just use a space)
+//   cleaned = cleaned.replace(/\\hfill\b/g, " ");
 
-  // 3. Simplify itemize options: \begin{itemize}[leftmargin=1.5em] -> \begin{itemize}
-  cleaned = cleaned.replace(
-    /\\begin\{itemize\}\s*\[[^\]]*]/g,
-    "\\begin{itemize}"
-  );
+//   // 3. Simplify itemize options: \begin{itemize}[leftmargin=1.5em] -> \begin{itemize}
+//   cleaned = cleaned.replace(
+//     /\\begin\{itemize\}\s*\[[^\]]*]/g,
+//     "\\begin{itemize}"
+//   );
 
-  // 4. (Optional) If you ever get duplicate sections like \section and \section* with same title:
-  cleaned = cleaned.replace(
-    /\\section\{([^}]*)\}\s*\\section\*\{\1\}/g,
-    "\\section*{$1}"
-  );
+//   // 4. (Optional) If you ever get duplicate sections like \section and \section* with same title:
+//   cleaned = cleaned.replace(
+//     /\\section\{([^}]*)\}\s*\\section\*\{\1\}/g,
+//     "\\section*{$1}"
+//   );
 
-  return cleaned;
-}
+//   return cleaned;
+// }
 
 
-function extractDocumentBody(tex: string): string {
-  const beginTag = "\\begin{document}";
-  const endTag = "\\end{document}";
+// function extractDocumentBody(tex: string): string {
+//   const beginTag = "\\begin{document}";
+//   const endTag = "\\end{document}";
 
-  const beginIdx = tex.indexOf(beginTag);
-  const endIdx = tex.indexOf(endTag);
+//   const beginIdx = tex.indexOf(beginTag);
+//   const endIdx = tex.indexOf(endTag);
 
-  if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
-    return tex.slice(beginIdx + beginTag.length, endIdx).trim();
-  }
+//   if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
+//     return tex.slice(beginIdx + beginTag.length, endIdx).trim();
+//   }
 
-  // If there is no explicit document env, just return as-is
-  return tex;
-}
+//   // If there is no explicit document env, just return as-is
+//   return tex;
+// }
 
 
 function App() {
@@ -69,30 +70,56 @@ function App() {
   const [sections, setSections] = useState<ResumeSection[]>([])
   const [selectedSections, setSelectedSections] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor')
+  const [activeTab, setActiveTab] = useState<'editor' | 'preview' | 'pdf'>('editor')
   const previewRef = useRef<HTMLDivElement>(null)
   const [preamble, setPreamble] = useState<string>('');
   const [postamble, setPostamble] = useState<string>('');
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  
   useEffect(() => {
     if (activeTab === 'preview' && previewRef.current) {
       renderPreview();
     }
+    if (activeTab === 'pdf' && !pdfUrl) {
+      generatePdf();
+    }
   }, [activeTab, sections])
+
+  const generatePdf = async () => {
+    setPdfLoading(true);
+    try {
+      const fullLatex = reconstructLatex().replace(/\\n\s*/g, "\n");
+      console.log(fullLatex)
+      const response = await fetch('http://localhost:3000/compile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latex: fullLatex })
+      });
+
+      if (!response.ok) throw new Error("Compilation failed");
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setPdfUrl(url);
+    } catch (error) {
+      console.error("PDF generation failed:", error);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   const renderPreview = () => {
     if (!previewRef.current) return;
     try {
       const fullLatex = reconstructLatex();
-      let body = stripDocumentEnvironment(fullLatex);
+      // let body = stripDocumentEnvironment(fullLatex);
 
-    // 3. Fix literal "\n" artifacts from LLM / JSON
-     body = sanitizeLatexForPreview(body);
-console.log(body)
-      // const bodyLatex = extractDocumentBody(fullLatex)
-      // const sanitizedLatex = sanitizeLatexForPreview(fullLatex)
-      // console.log(sanitizedLatex)
+      // // 3. Fix literal "\n" artifacts from LLM / JSON
+      // body = sanitizeLatexForPreview(body);
+      // // console.log(body)
+      const body = fullLatex.replace(/\\n\s*/g, "\n");
+
       const generator = new HtmlGenerator({ hyphenate: false });
       const doc = parse(body, { generator: generator });
 
@@ -108,10 +135,10 @@ console.log(body)
     //const preamble = sections.find(s => s.title === 'preamble')?.latex || '';
     const body = sections
       .filter(s => s.title !== 'preamble')
-      .map(s => `\\section{${s.title}}\n${s.latex}`)
+      .map(s => `\n${s.latex}`)
       .join('\n\n');
 
-    return `${preamble}\n\\begin{document}\n${body}\n\\end{document}`;
+    return `${preamble}\\begin{document}\n${body}\n\\end{document}\n${postamble}`;
   }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -131,8 +158,8 @@ console.log(body)
 
       const data = await response.json()
       const rawSections: Section[] = data.sections;
-      const preamble = data.preamble_lines.join("\n");
-      const postamble = data.postamble_lines.join("\n");
+      const preamble = data.preamble_lines;
+      const postamble = data.postamble_lines;
       setPreamble(preamble)
       setPostamble(postamble)
       const reconstructed = rawSections.map((s) => ({
@@ -198,6 +225,8 @@ console.log(body)
             : sec
         ))
       }
+      // invalidate pdf
+      setPdfUrl(null);
 
     } catch (error) {
       console.error("AI Operations failed", error)
@@ -294,11 +323,12 @@ console.log(body)
                   </div>
                   <textarea
                     className="w-full h-32 bg-slate-950 border border-slate-800 rounded p-3 text-xs font-mono text-slate-300 focus:border-blue-500 focus:outline-none scrollbar-thin scrollbar-thumb-slate-700 transition"
-                    value={section.latex}
+                    value={section.latex.replace(/\\n\s*/g, "\n")}
                     onChange={(e) => {
                       setSections(prev => prev.map((sec, i) =>
                         i === index ? { ...sec, latex: e.target.value } : sec
                       ))
+                      setPdfUrl(null); // Invalidate PDF on edit
                     }}
                   />
                 </div>
@@ -315,7 +345,7 @@ console.log(body)
               onClick={() => setActiveTab('editor')}
               className={cn("text-xs font-medium h-full border-b-2 px-2 transition", activeTab === 'editor' ? "border-blue-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300")}
             >
-              Source Code
+              Source
             </button>
             <button
               onClick={() => setActiveTab('preview')}
@@ -323,13 +353,21 @@ console.log(body)
             >
               Web Preview
             </button>
+            <button
+              onClick={() => setActiveTab('pdf')}
+              className={cn("text-xs font-medium h-full border-b-2 px-2 transition", activeTab === 'pdf' ? "border-blue-500 text-white" : "border-transparent text-slate-500 hover:text-slate-300")}
+            >
+              PDF Preview
+            </button>
           </div>
           <div className="flex-1 p-4 bg-slate-900/50 overflow-auto">
-            {activeTab === 'editor' ? (
+            {activeTab === 'editor' && (
               <pre className="text-xs text-slate-400 font-mono whitespace-pre-wrap">
                 {reconstructLatex()}
               </pre>
-            ) : (
+            )}
+
+            {activeTab === 'preview' && (
               <div
                 ref={previewRef}
                 className="w-full h-full bg-white text-black p-8 overflow-auto shadow-lg resume-preview"
@@ -339,6 +377,26 @@ console.log(body)
                   <Wand2 className="w-8 h-8 opacity-20 animate-pulse" />
                   <p className='text-xs'>Rendering Preview...</p>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'pdf' && (
+              <div className="w-full h-full flex items-center justify-center">
+              <button onClick={generatePdf} className="text-blue-400 hover:underline mt-2">Retry</button>
+   
+                {pdfLoading ? (
+                  <div className="flex flex-col items-center gap-2 text-slate-400">
+                    <Wand2 className="w-6 h-6 animate-spin" />
+                    <span className="text-xs">Compiling PDF with Tectonic...</span>
+                  </div>
+                ) : pdfUrl ? (
+                  <iframe src={pdfUrl} className="w-full h-full rounded shadow-lg" title="PDF Preview" />
+                ) : (
+                  <div className="text-slate-500 text-xs text-center">
+                    <p>Unable to load PDF.</p>
+                    <button onClick={generatePdf} className="text-blue-400 hover:underline mt-2">Retry</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
