@@ -85,9 +85,9 @@ const reconstructLatex = ((sectionsToUse: typeof sections) => {
         title: s.title,
         latex: s.latex_lines.join("\n"),
       }));
-
-      setPreamble(data.preamble_lines);
-      setPostamble(data.postamble_lines);
+console.log(data.preamble_lines)
+      setPreamble(data.preamble_lines.join("\n"));
+      setPostamble(data.postamble_lines.join("\n"));
       setSections(rawSections);
 
       // Select all by default except preamble

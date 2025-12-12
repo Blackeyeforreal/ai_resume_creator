@@ -4,7 +4,6 @@ import { log } from "console";
 
 import { fixInvalidBackslashes } from './util.js';
 
-
 export class AIAgent {
   private model: Ollama;
 
@@ -12,95 +11,113 @@ export class AIAgent {
     this.model = new Ollama({
       baseUrl: "http://localhost:11434",
       model: "llama3.2:latest",
-      temperature: 0.2,
+      temperature: 0, // Lower temperature for deterministic tasks
     });
   }
 
-  async parseLatext( resume : string  ){
-    interface ResuresmeSection {
-    title: string;
-    latex_lines: string[];
-}
-interface result {
-    sections: ResuresmeSection[];
-    preamble_lines: string[];
-    postamble_lines: string[];
-}
+  async parseLatext(resume: string) {
+    // 1. Split lines deterministically in code first
+    const lines = resume.split(/\r?\n/);
+    const linesWithIndex = lines.map((line, index) => `${index}: ${line}`).join('\n');
 
-   
+    // 2. Simplified Prompt: Only ask for the PLAN, not the execution.
     const prompt = PromptTemplate.fromTemplate(`
-You are a LaTeX resume parser.
+You are a LaTeX parser assistant.
+Your goal is to identify the line numbers where specific Resume Sections begin.
 
-You will be given the full LaTeX source of a resume in the placeholder LATEX_SOURCE below .
+Input: A list of lines from a LaTeX file, numbered.
+Output: A JSON object mapping Section Titles to their STARTING line number.
 
-Your tasks:
-1. Identify logical resume sections (for example: "Summary", "Experience", "Projects", "Skills", "Education", "Achievements", etc.).
-2. Split the LaTeX into three parts:
-    - "sections": an ordered list of sections. Each section object must include the section title and an array "latex_lines" with the exact lines that belong to that section.
-     * The section's first latex line MUST be the section header itself
-    (for example: "\\section{{X}}" or "\\section*{{X}}" or any custom command line that serves as the header).
-     Do NOT omit or move the header line into preamble or postamble.
-   
+Rules:
+1. Identify the "Preamble" (usually starts at line 0).
+2. Identify major sections (e.g., "Experience", "Education", "Skills") by finding lines like \\section{{...}} or \\section*{{...}}.
+3. The "Postamble" usually starts at \\end{{document}}.
+4. Return ONLY valid JSON.
 
-VERY IMPORTANT: Preserve every single line of the input. There must be NO DATA LOSS.
+Example Input:
+0: \\documentclass{{article}}
+1: \\begin{{document}}
+2: \\section{{Education}}
+3: ...
+10: \\section{{Skills}}
 
-Output format (very strict):
-- Respond with ONLY valid JSON. No markdown, no backticks, no explanations.
-- The top-level JSON object must have this exact shape (note: double braces are shown for template safety; your output must be plain JSON):
-
+Example Output:
 {{
-
   "sections": [
-    {{
-      "title": "Summary",
-      "latex_lines": [ "...",
-                       "...",
-                        "..." ]
-    }}
-  ],
-  
+    {{ "title": "preamble", "start_line": 0 }},
+    {{ "title": "Education", "start_line": 2 }},
+    {{ "title": "Skills", "start_line": 10 }},
+    {{ "title": "postamble", "start_line": 99 }}
+  ]
 }}
 
-MANDATORY RULES (read carefully):
-- Introduce the escape character that it remains valid string even if we have  inverted commans in the string  
-- **Line granularity**: Each element in any *_lines array must be exactly ONE input line from the original source. Do NOT join multiple original lines into one element. Do NOT split an original line across multiple elements.
-- **Exact content**: Copy each line exactly as it appears in the input (preserve characters and order). Do NOT rewrite, normalize, or reflow content.
-- **Whitespace**: Preserve leading and trailing spaces of each line verbatim. (So the parser must not trim lines.)
-- **Backslashes**: Because this will be returned as JSON, every LaTeX backslash "\\" in the JSON must be escaped as "\\" so the JSON is valid. Example (how one input line must appear in JSON): the LaTeX line \\section*{{Summary}} must appear in JSON as "\\section*{{Summary}}".
-- **Sections**: The section header line (e.g. \\section{{...}} or \\section*{{...}} or any custom header command line) must be included as the first element of the  latex_lines for that section. If the file has both \\section{{X}} and \\section*{{X}} in succession, preserve both lines in order (do NOT deduplicate unless identical and intentional).
-
-- **Completeness / Reconstruction requirement**: If you concatenate the arrays in order with \\n between lines:
-the reconstructedstring must be exactly the original input (byte-for-byte identical after normalizing line endings to LF). Do not omit any line or change any character.
-- **No extra text**: Output must contain only the JSON object, nothing else. Do not include commentary, diagnostics, or notes.
-- **If uncertain, keep the line**: When in doubt about whether a line belongs to the preamble, a section, or the postamble, include it where it logically fits **but do not drop it**. Better to include a doubtful line in the preamble than to lose it.
-
-
-Now the input. Remember: do NOT add anything before or after your JSON.
-
-LATEX_SOURCE:
- {resume}
-
+Now analyze this file:
+{linesWithIndex}
 `);
+
     const chain = prompt.pipe(this.model);
+
     try {
-      let result = (await chain.invoke({resume}))
-      //preable and postable from result 
-      console.log(result);
-      const ind =result.indexOf('{');
-      console.log(",-------------------------?")
-      result = fixInvalidBackslashes(result.slice(result.indexOf('{') , result.lastIndexOf('}') + 1) );
-      console.log(result);
-      const jsonParsed = JSON.parse(result);
+      // 3. Get the "Map" from the AI
+      const response = await chain.invoke({linesWithIndex});
       
-      jsonParsed.preamble_lines = resume.slice(0, resume.indexOf(jsonParsed.sections[0].latex_lines[0]));
-      jsonParsed.postamble_lines = resume.slice(resume.lastIndexOf(jsonParsed.sections[jsonParsed.sections.length - 1].latex_lines[0]));
+      // Clean and parse JSON
+      const jsonString = response.slice(response.indexOf('{'), response.lastIndexOf('}') + 1);
+      const plan = JSON.parse(jsonString);
+
+      // 4. Execute the split deterministically in CODE (Level 2 Reliability)
+      const sections = [];
+      const sortedSections = plan.sections.sort((a: any, b: any) => a.start_line - b.start_line);
+
+      for (let i = 0; i < sortedSections.length; i++) {
+        const current = sortedSections[i];
+        const next = sortedSections[i + 1];
+        
+        // Define range
+        const start = current.start_line;
+        const end = next ? next.start_line : lines.length; // Last section goes to end
+
+        // Extract lines safely using original array
+        const sectionLines = lines.slice(start, end);
+
+        // Map to your desired structure
+        if (current.title === 'preamble') {
+          // Special handling if you want separate preamble field
+           // or just push it as a section depending on your frontend logic
+           // For now, let's match your interface roughly, or return it as part of result
+        }
+
+        sections.push({
+          title: current.title,
+          latex_lines: sectionLines
+        });
+      }
+
+      // Filter out preamble/postamble to match your specific return type if needed
+      // This is a rough mapping to your exact interface:
       
-      return jsonParsed;
+      const preambleObj = sections.find(s => s.title.toLowerCase() === 'preamble');
+      const postambleObj = sections.find(s => s.title.toLowerCase() === 'postamble');
+      const coreSections = sections.filter(s => s.title !== 'preamble' && s.title !== 'postamble');
+
+      return {
+        sections: coreSections,
+        preamble_lines: preambleObj ? preambleObj.latex_lines : [],
+        postamble_lines: postambleObj ? postambleObj.latex_lines : [],
+      };
+
     } catch (error) {
-      console.error("AI Error:", error);
-      return JSON.stringify({ error: "Failed to analyze resume. Ensure Ollama is running." });
+      console.error("AI Analysis Failed:", error);
+      // Fallback: Return everything as one section or error
+      return { 
+          sections: [{ title: "Full Document", latex_lines: lines }], 
+          preamble_lines: [], 
+          postamble_lines: [] 
+      };
     }
   }
+
+
 
   async analyzeJobDescription(jdText: string): Promise<string> {
     const prompt = PromptTemplate.fromTemplate(`
