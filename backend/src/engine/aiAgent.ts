@@ -53,13 +53,16 @@ Output format (very strict):
   "sections": [
     {{
       "title": "Summary",
-      "latex_lines": [ "...", "..." ]
+      "latex_lines": [ "...",
+                       "...",
+                        "..." ]
     }}
   ],
   
 }}
 
 MANDATORY RULES (read carefully):
+- Introduce the escape character that it remains valid string even if we have  inverted commans in the string  
 - **Line granularity**: Each element in any *_lines array must be exactly ONE input line from the original source. Do NOT join multiple original lines into one element. Do NOT split an original line across multiple elements.
 - **Exact content**: Copy each line exactly as it appears in the input (preserve characters and order). Do NOT rewrite, normalize, or reflow content.
 - **Whitespace**: Preserve leading and trailing spaces of each line verbatim. (So the parser must not trim lines.)
@@ -83,13 +86,14 @@ LATEX_SOURCE:
       let result = (await chain.invoke({resume}))
       //preable and postable from result 
       console.log(result);
+      const ind =result.indexOf('{');
       console.log(",-------------------------?")
       result = fixInvalidBackslashes(result.slice(result.indexOf('{') , result.lastIndexOf('}') + 1) );
       console.log(result);
       const jsonParsed = JSON.parse(result);
       
-      jsonParsed.preamble_lines = resume.split(jsonParsed.sections[0].latex_lines)[0];
-      jsonParsed.postamble_lines = resume.split(jsonParsed.sections[jsonParsed.sections.length - 1].latex_lines)[1];
+      jsonParsed.preamble_lines = resume.slice(0, resume.indexOf(jsonParsed.sections[0].latex_lines[0]));
+      jsonParsed.postamble_lines = resume.slice(resume.lastIndexOf(jsonParsed.sections[jsonParsed.sections.length - 1].latex_lines[0]));
       
       return jsonParsed;
     } catch (error) {
